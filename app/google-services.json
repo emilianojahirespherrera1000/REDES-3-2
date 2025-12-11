@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "753999680274",
+    "project_id": "rutasmart-aa536",
+    "storage_bucket": "rutasmart-aa536.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:753999680274:android:2830be0eec1ece18e419cb",
+        "android_client_info": {
+          "package_name": "com.example.proyectoredes3"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "753999680274-89sg64p5if3n48pjsl7epm29a5cpdbid.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.proyectoredes3",
+            "certificate_hash": "1245755a6aaac4dad8fcb1b146025e02bfe676c3"
+          }
+        },
+        {
+          "client_id": "753999680274-ci4b1jqugts2read7inc4fgo8j7ijtrn.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCBfO4w_wg6dw3bvHP6yZx6y2ln0noOWd4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "753999680274-ci4b1jqugts2read7inc4fgo8j7ijtrn.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

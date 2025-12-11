@@ -1,6 +1,5 @@
 package com.example.proyectoredes3
 
-import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
@@ -10,21 +9,26 @@ import android.os.Handler
 import android.os.Looper
 import android.preference.PreferenceManager
 import android.view.View
-import android.view.animation.LinearInterpolator
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 
-// IMPORTACIONES DE OPENSTREETMAP
+// IMPORTACIONES OSM
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+
+// IMPORTACIONES RETROFIT
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
 
 class MainActivity : AppCompatActivity() {
 
@@ -38,30 +42,34 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvStatus: TextView
     private lateinit var detailsContainer: LinearLayout
 
-    private val markers = mutableListOf<Marker>()
-    private val handler = Handler(Looper.getMainLooper())
+    // CAMBIO: Usamos un MAPA para rastrear múltiples marcadores por su ID
+    private val busMarkers = mutableMapOf<String, Marker>()
 
-    // Datos simulados
-    private val mockBuses = listOf(
-        MockBus("A-107", 22.1450, -102.2740, "15 min", "En Ruta", "Cifrado AES-256"),
-        MockBus("A-108", 22.0600, -102.2850, "30 min", "En Ruta", "Sync Google Drive"),
-        MockBus("A-109", 21.9400, -102.3000, "5 min", "Llegando", "NFS Replicado")
-    )
+    private val handler = Handler(Looper.getMainLooper())
+    private lateinit var apiService: ApiService.ApiService
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // --- CONFIGURACIÓN DE OPENSTREETMAP ---
         val ctx = applicationContext
         Configuration.getInstance().load(ctx, PreferenceManager.getDefaultSharedPreferences(ctx))
-
-        // CORRECCIÓN AQUÍ: Ponemos el nombre del paquete directo
         Configuration.getInstance().userAgentValue = "com.example.proyectoredes3"
 
         setContentView(R.layout.activity_main)
 
+        setupRetrofit()
         setupUI()
         setupMap()
+    }
+
+    private fun setupRetrofit() {
+        // ⚠️ REVISA QUE ESTA SEA TU IP ACTUAL DE LA VM APP (ej. 192.168.100.156)
+        val retrofit = Retrofit.Builder()
+            .baseUrl(Config.BASE_URL) // <--- ¡AQUÍ ESTÁ EL CAMBIO!
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+
+        apiService = retrofit.create(ApiService.ApiService::class.java)
     }
 
     private fun setupUI() {
@@ -77,9 +85,9 @@ class MainActivity : AppCompatActivity() {
         detailsContainer = findViewById(R.id.detailsContainer)
 
         findViewById<FloatingActionButton>(R.id.fabRecenter).setOnClickListener {
-            val centro = GeoPoint(22.03, -102.28)
+            val centro = GeoPoint(21.885, -102.291)
             map.controller.animateTo(centro)
-            map.controller.setZoom(11.0)
+            map.controller.setZoom(14.0)
         }
     }
 
@@ -88,90 +96,119 @@ class MainActivity : AppCompatActivity() {
         map.setTileSource(TileSourceFactory.MAPNIK)
         map.setMultiTouchControls(true)
 
-        val startPoint = GeoPoint(22.03, -102.28)
-        map.controller.setZoom(11.0)
+        // Centro inicial (Aguascalientes)
+        val startPoint = GeoPoint(21.885, -102.291)
+        map.controller.setZoom(14.0)
         map.controller.setCenter(startPoint)
 
-        initializeMarkers()
-        startSimulationLoop()
+        // Ya no llamamos a initializeMarker() porque los marcadores se crean dinámicamente
+        startNetworkLoop()
     }
 
-    private fun initializeMarkers() {
-        // En caso de error cargando el icono, usamos uno genérico para que no falle la app
-        val iconDrawable = try {
-            getIconDrawable(R.drawable.ic_bus_vector)
-        } catch (e: Exception) {
-            ContextCompat.getDrawable(this, android.R.drawable.ic_menu_myplaces)
-        }
-
-        for (bus in mockBuses) {
-            val marker = Marker(map)
-            marker.position = GeoPoint(bus.lat, bus.lng)
-            marker.title = "Unidad ${bus.id}"
-            marker.icon = iconDrawable
-            marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-
-            marker.setOnMarkerClickListener { m, _ ->
-                showBusDetails(bus, m)
-                true
-            }
-            map.overlays.add(marker)
-            markers.add(marker)
-        }
-        map.invalidate()
-    }
-
-    private fun showBusDetails(bus: MockBus, marker: Marker) {
-        tvSheetTitle.text = "Combi ${bus.id}"
-        tvSheetSubtitle.text = "Estado: ${bus.status}"
-        tvEta.text = bus.eta
-        tvStatus.text = bus.serverStatus
-
-        detailsContainer.visibility = View.VISIBLE
-        bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
-        map.controller.animateTo(marker.position)
-    }
-
-    private fun startSimulationLoop() {
+    private fun startNetworkLoop() {
         val updateRunnable = object : Runnable {
             override fun run() {
-                animateMovement()
-                handler.postDelayed(this, 3000)
+                fetchBusData()
+                handler.postDelayed(this, 3000) // Se actualiza cada 3 segundos
             }
         }
         handler.post(updateRunnable)
     }
 
-    private fun animateMovement() {
-        for ((index, marker) in markers.withIndex()) {
-            val start = marker.position
-            val bus = mockBuses[index]
+    private fun fetchBusData() {
+        // Solicitamos la lista
+        apiService.getUbicacion().enqueue(object : Callback<List<ApiService.BusResponse>> {
+            override fun onResponse(call: Call<List<ApiService.BusResponse>>, response: Response<List<ApiService.BusResponse>>) {
+                if (response.isSuccessful && response.body() != null) {
+                    val busesList = response.body()!!
+                    updateAllMarkers(busesList)
 
-            val newLat = start.latitude - 0.002
-            val newLng = start.longitude + (Math.random() * 0.0002 - 0.0001)
+                    // Actualizamos el status general
+                    tvStatus.text = "SISTEMA ONLINE - ${busesList.size} Unidades Activas"
 
-            var endLat = newLat
-            var endLng = newLng
-
-            if (endLat < 21.85) {
-                endLat = 22.15
-                endLng = -102.27
+                    // Opcional: Si solo hay 1 bus o queremos mostrar info del primero en el panel
+                    if (busesList.isNotEmpty()) {
+                        updateBottomSheetInfo(busesList[0])
+                    }
+                } else {
+                    tvStatus.text = "Error Servidor: ${response.code()}"
+                }
             }
 
-            bus.lat = endLat
-            bus.lng = endLng
-
-            val valueAnimator = ValueAnimator.ofFloat(0f, 1f)
-            valueAnimator.duration = 3000
-            valueAnimator.interpolator = LinearInterpolator()
-            valueAnimator.addUpdateListener { va ->
-                val v = va.animatedFraction
-                val lng = v * endLng + (1 - v) * start.longitude
-                val lat = v * endLat + (1 - v) * start.latitude
-                marker.position = GeoPoint(lat, lng)
-                map.invalidate()
+            override fun onFailure(call: Call<List<ApiService.BusResponse>>, t: Throwable) {
+                tvStatus.text = "Desconectado: Buscando señal..."
             }
-            valueAnimator.start()
+        })
+    }
+
+    private fun updateAllMarkers(buses: List<ApiService.BusResponse>) {
+        // 1. Obtener la lista de IDs que están VIVOS en este momento
+        val currentBusIds = buses.map { it.busId }
+
+        // 2. LIMPIEZA: Eliminar marcadores que ya no existen en el servidor
+        val iterator = busMarkers.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            val markerId = entry.key
+
+            // Si el marcador que tengo en el mapa NO está en la lista nueva...
+            if (!currentBusIds.contains(markerId)) {
+                // ... lo borramos del mapa visualmente
+                entry.value.remove(map)
+                // ... y lo sacamos de mi diccionario
+                iterator.remove()
+            }
+        }
+
+        // 3. ACTUALIZAR O CREAR (Tu lógica normal)
+        val iconDrawable = try {
+            getIconDrawable(R.drawable.ic_bus_vector) // Asegúrate de tener este ícono o usa el default
+        } catch (e: Exception) {
+            ContextCompat.getDrawable(this, android.R.drawable.ic_menu_directions)
+        }
+
+        for (bus in buses) {
+            val newPoint = GeoPoint(bus.lat, bus.lon)
+            val busId = bus.busId
+
+            if (busMarkers.containsKey(busId)) {
+                val marker = busMarkers[busId]!!
+                marker.position = newPoint
+                marker.snippet = "Estado: ${bus.estado}"
+                // Forzar redibujado del infowindow si está abierto
+                if (marker.isInfoWindowShown) {
+                    marker.showInfoWindow()
+                }
+            } else {
+                val newMarker = Marker(map)
+                newMarker.position = newPoint
+                newMarker.icon = iconDrawable
+                newMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                newMarker.title = busId
+                newMarker.snippet = bus.estado ?: "En ruta"
+
+                newMarker.setOnMarkerClickListener { m, _ ->
+                    val selectedBus = buses.find { it.busId == m.title }
+                    if (selectedBus != null) updateBottomSheetInfo(selectedBus)
+                    m.showInfoWindow()
+                    true
+                }
+
+                map.overlays.add(newMarker)
+                busMarkers[busId] = newMarker
+            }
+        }
+
+        map.invalidate() // Refrescar mapa
+    }
+
+    private fun updateBottomSheetInfo(data: ApiService.BusResponse) {
+        tvSheetTitle.text = "Unidad: ${data.busId}"
+        tvSheetSubtitle.text = "Estado: ${data.estado}"
+        tvEta.text = "En tránsito"
+
+        if (detailsContainer.visibility != View.VISIBLE) {
+            detailsContainer.visibility = View.VISIBLE
         }
     }
 
@@ -187,12 +224,3 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() { super.onResume(); map.onResume() }
     override fun onPause() { super.onPause(); map.onPause() }
 }
-
-data class MockBus(
-    val id: String,
-    var lat: Double,
-    var lng: Double,
-    val eta: String,
-    val status: String,
-    val serverStatus: String
-)

@@ -87,7 +87,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="● Conectado a 192.168.1.107"
+                        android:text="● Conectado a APP SERVER"
                         android:textStyle="bold"
                         android:textSize="14sp"
                         android:textColor="@color/rs_success"/>
